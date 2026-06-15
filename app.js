@@ -13,6 +13,8 @@ const state = {
   monthLabel: "",
   current: null,
   previous: null,
+  currentWeek: null,
+  previousWeek: null,
   month: null,
   products: [],
   metricCounter: 0,
@@ -138,6 +140,7 @@ function emptyAggregate(label, index) {
     dates: new Set(),
     units: 0,
     sales: 0,
+    primaryProfit: 0,
     profit: 0,
     adFee: 0,
     sessions: 0,
@@ -157,6 +160,7 @@ function addValues(target, values, productName) {
   [
     "units",
     "sales",
+    "primaryProfit",
     "profit",
     "adFee",
     "sessions",
@@ -179,6 +183,7 @@ function addValues(target, values, productName) {
   [
     "units",
     "sales",
+    "primaryProfit",
     "profit",
     "adFee",
     "sessions",
@@ -196,11 +201,13 @@ function finalizeAggregate(aggregate) {
   const result = { ...aggregate };
   result.dayCount = aggregate.dates.size || 1;
   result.aov = aggregate.units ? aggregate.sales / aggregate.units : 0;
+  result.primaryMargin = aggregate.sales ? aggregate.primaryProfit / aggregate.sales : 0;
   result.margin = aggregate.sales ? aggregate.profit / aggregate.sales : 0;
   result.tacos = aggregate.sales ? aggregate.adFee / aggregate.sales : 0;
   result.cvr = aggregate.sessions ? aggregate.units / aggregate.sessions : 0;
   result.ctr = aggregate.impressions ? aggregate.clicks / aggregate.impressions : 0;
   result.adCvr = aggregate.clicks ? aggregate.adOrders / aggregate.clicks : 0;
+  result.cpc = aggregate.clicks ? aggregate.adSpend / aggregate.clicks : 0;
   result.acos = aggregate.adSales ? aggregate.adSpend / aggregate.adSales : 0;
   result.salesDaily = aggregate.sales / result.dayCount;
   result.unitsDaily = aggregate.units / result.dayCount;
@@ -248,6 +255,7 @@ function analyzeRows(rows) {
     date: findColumn(header, ["日期", "Date", "开始日期"]),
     units: findColumn(header, ["实际销量", "销量"]),
     sales: findColumn(header, ["加运费销售额", "销售额"]),
+    primaryProfit: findColumn(header, ["一级利润"]),
     profit: findColumn(header, ["二级利润"]),
     adFee: findColumn(header, ["广告费"]),
     sessions: findColumn(header, ["会话次数 – 总计", "会话次数总计", "访客", "Sessions"]),
@@ -280,16 +288,26 @@ function analyzeRows(rows) {
     item.date.getFullYear() === latestDate.getFullYear()
     && item.date.getMonth() === latestDate.getMonth()
   );
+  const previousMonthDate = new Date(latestDate.getFullYear(), latestDate.getMonth(), 0);
+  const previousMonthRows = parsedRows.filter((item) =>
+    item.date.getFullYear() === previousMonthDate.getFullYear()
+    && item.date.getMonth() === previousMonthDate.getMonth()
+  );
 
   const weeks = WEEK_NAMES.map((label, index) => emptyAggregate(label, index));
   const month = emptyAggregate(`${latestDate.getFullYear()}年${latestDate.getMonth() + 1}月`, -1);
+  const previousMonth = emptyAggregate(
+    `${previousMonthDate.getFullYear()}年${previousMonthDate.getMonth() + 1}月`,
+    -2,
+  );
 
-  monthRows.forEach(({ row, date, product }) => {
+  const readRows = (sourceRows, aggregate, includeWeeks) => sourceRows.forEach(({ row, date, product }) => {
     const read = (key) => columns[key] >= 0 ? toNumber(row[columns[key]]) : 0;
     const values = {
       dateKey: formatDate(date),
       units: read("units"),
       sales: read("sales"),
+      primaryProfit: read("primaryProfit"),
       profit: read("profit"),
       adFee: read("adFee"),
       sessions: read("sessions"),
@@ -301,9 +319,11 @@ function analyzeRows(rows) {
       stock: read("stock"),
       transit: read("transit"),
     };
-    addValues(weeks[weekIndex(date)], values, product);
-    addValues(month, values, product);
+    if (includeWeeks) addValues(weeks[weekIndex(date)], values, product);
+    addValues(aggregate, values, product);
   });
+  readRows(monthRows, month, true);
+  readRows(previousMonthRows, previousMonth, false);
 
   const populatedWeeks = weeks.filter((week) => week.dates.size);
   const currentRaw = populatedWeeks[populatedWeeks.length - 1];
@@ -312,17 +332,20 @@ function analyzeRows(rows) {
   return {
     latestDate,
     monthLabel: `${latestDate.getFullYear()}年${latestDate.getMonth() + 1}月`,
-    current: finalizeAggregate(currentRaw),
-    previous: previousRaw ? finalizeAggregate(previousRaw) : null,
+    currentWeek: finalizeAggregate(currentRaw),
+    previousWeek: previousRaw ? finalizeAggregate(previousRaw) : null,
     month: finalizeAggregate(month),
+    previousMonth: previousMonthRows.length ? finalizeAggregate(previousMonth) : null,
   };
 }
 
 function applyAnalysisResult(result) {
   state.latestDate = result.latestDate;
   state.monthLabel = result.monthLabel;
-  state.current = result.current;
-  state.previous = result.previous;
+  state.current = result.month;
+  state.previous = result.previousMonth;
+  state.currentWeek = result.currentWeek;
+  state.previousWeek = result.previousWeek;
   state.month = result.month;
   state.products = result.month.products.map((item) => item.name);
 
@@ -331,8 +354,8 @@ function applyAnalysisResult(result) {
   renderRecommendedAnalysis();
   $("periodInfo").classList.remove("hidden");
   $("periodInfo").textContent = state.previous
-    ? `数据期间：${state.monthLabel}；最新周为${state.current.label}（${state.current.dayCount}天），对比${state.previous.label}（${state.previous.dayCount}天）。总量指标按日均环比。`
-    : `数据期间：${state.monthLabel}；当前仅识别到${state.current.label}，暂不计算周环比。`;
+    ? `数据口径：${state.current.label}整月累计，对比${state.previous.label}。每日和周度明细仅作为月度汇总的数据来源。`
+    : `数据口径：${state.current.label}整月累计；未识别到上月数据，暂不计算月度环比。`;
 }
 
 function setStatus(message, type) {
@@ -363,35 +386,36 @@ function renderSummary() {
     {
       label: `${current.label} GMV`,
       value: formatMoney(current.sales),
-      delta: previous ? change(current.salesDaily, previous.salesDaily) : null,
-      note: "日均环比",
+      delta: previous ? change(current.sales, previous.sales) : null,
+      note: "月度环比",
     },
     {
       label: `${current.label}销量`,
       value: formatNumber(current.units),
-      delta: previous ? change(current.unitsDaily, previous.unitsDaily) : null,
-      note: "日均环比",
+      delta: previous ? change(current.units, previous.units) : null,
+      note: "月度环比",
+    },
+    {
+      label: "一级利润率",
+      value: formatPercent(current.primaryMargin),
+      delta: previous ? pointChange(current.primaryMargin, previous.primaryMargin) : null,
+      note: "较上月",
+      points: true,
     },
     {
       label: "二级利润率",
       value: formatPercent(current.margin),
       delta: previous ? pointChange(current.margin, previous.margin) : null,
-      note: "较上周",
+      note: "较上月",
       points: true,
     },
     {
       label: "TACOS",
       value: formatPercent(current.tacos),
       delta: previous ? pointChange(current.tacos, previous.tacos) : null,
-      note: "较上周",
+      note: "较上月",
       points: true,
       reverse: true,
-    },
-    {
-      label: "访客 / 会话",
-      value: formatNumber(current.sessions),
-      delta: previous ? change(current.sessionsDaily, previous.sessionsDaily) : null,
-      note: "日均环比",
     },
     {
       label: "综合转化率",
@@ -400,16 +424,11 @@ function renderSummary() {
       note: "环比",
     },
     {
-      label: "广告CTR",
-      value: formatPercent(current.ctr),
-      delta: previous ? change(current.ctr, previous.ctr) : null,
-      note: "环比",
-    },
-    {
-      label: "广告转化率",
-      value: formatPercent(current.adCvr),
-      delta: previous ? change(current.adCvr, previous.adCvr) : null,
-      note: "环比",
+      label: "CPC",
+      value: formatMoney(current.cpc),
+      delta: previous ? change(current.cpc, previous.cpc) : null,
+      note: "月度环比",
+      reverse: true,
     },
   ];
 
@@ -437,25 +456,34 @@ function metricDefinitions() {
       name: "GMV",
       value: formatMoney(current.sales),
       detail: previous
-        ? `日均 ${formatMoney(current.salesDaily)}，较${previous.label}${formatChange(change(current.salesDaily, previous.salesDaily))}`
-        : "暂无上周数据",
-      delta: previous ? change(current.salesDaily, previous.salesDaily) : null,
+        ? `较${previous.label}${formatChange(change(current.sales, previous.sales))}`
+        : "暂无上月数据",
+      delta: previous ? change(current.sales, previous.sales) : null,
       direction: "normal",
     },
     {
       name: "销量",
       value: `${formatNumber(current.units)}件`,
       detail: previous
-        ? `日均 ${formatNumber(current.unitsDaily, 1)}件，较${previous.label}${formatChange(change(current.unitsDaily, previous.unitsDaily))}`
-        : "暂无上周数据",
-      delta: previous ? change(current.unitsDaily, previous.unitsDaily) : null,
+        ? `较${previous.label}${formatChange(change(current.units, previous.units))}`
+        : "暂无上月数据",
+      delta: previous ? change(current.units, previous.units) : null,
       direction: "normal",
     },
     {
       name: "平均客单价",
       value: formatMoney(current.aov),
-      detail: previous ? `较${previous.label}${formatChange(change(current.aov, previous.aov))}` : "暂无上周数据",
+      detail: previous ? `较${previous.label}${formatChange(change(current.aov, previous.aov))}` : "暂无上月数据",
       delta: previous ? change(current.aov, previous.aov) : null,
+      direction: "normal",
+    },
+    {
+      name: "一级利润率",
+      value: formatPercent(current.primaryMargin),
+      detail: previous
+        ? `较${previous.label}${(pointChange(current.primaryMargin, previous.primaryMargin) * 100).toFixed(2)}个百分点`
+        : "暂无上月数据",
+      delta: previous ? change(current.primaryMargin, previous.primaryMargin) : null,
       direction: "normal",
     },
     {
@@ -463,7 +491,7 @@ function metricDefinitions() {
       value: formatPercent(current.margin),
       detail: previous
         ? `较${previous.label}${(pointChange(current.margin, previous.margin) * 100).toFixed(2)}个百分点`
-        : "暂无上周数据",
+        : "暂无上月数据",
       delta: previous ? change(current.margin, previous.margin) : null,
       direction: "normal",
     },
@@ -471,38 +499,45 @@ function metricDefinitions() {
       name: "访客 / 会话",
       value: formatNumber(current.sessions),
       detail: previous
-        ? `日均 ${formatNumber(current.sessionsDaily)}，较${previous.label}${formatChange(change(current.sessionsDaily, previous.sessionsDaily))}`
-        : "暂无上周数据",
-      delta: previous ? change(current.sessionsDaily, previous.sessionsDaily) : null,
+        ? `较${previous.label}${formatChange(change(current.sessions, previous.sessions))}`
+        : "暂无上月数据",
+      delta: previous ? change(current.sessions, previous.sessions) : null,
       direction: "normal",
     },
     {
       name: "综合转化率",
       value: formatPercent(current.cvr),
-      detail: previous ? `较${previous.label}${formatChange(change(current.cvr, previous.cvr))}` : "暂无上周数据",
+      detail: previous ? `较${previous.label}${formatChange(change(current.cvr, previous.cvr))}` : "暂无上月数据",
       delta: previous ? change(current.cvr, previous.cvr) : null,
       direction: "normal",
     },
     {
       name: "广告点击率",
       value: formatPercent(current.ctr),
-      detail: previous ? `较${previous.label}${formatChange(change(current.ctr, previous.ctr))}` : "暂无上周数据",
+      detail: previous ? `较${previous.label}${formatChange(change(current.ctr, previous.ctr))}` : "暂无上月数据",
       delta: previous ? change(current.ctr, previous.ctr) : null,
       direction: "normal",
     },
     {
       name: "广告转化率",
       value: formatPercent(current.adCvr),
-      detail: previous ? `较${previous.label}${formatChange(change(current.adCvr, previous.adCvr))}` : "暂无上周数据",
+      detail: previous ? `较${previous.label}${formatChange(change(current.adCvr, previous.adCvr))}` : "暂无上月数据",
       delta: previous ? change(current.adCvr, previous.adCvr) : null,
       direction: "normal",
+    },
+    {
+      name: "CPC",
+      value: formatMoney(current.cpc),
+      detail: previous ? `较${previous.label}${formatChange(change(current.cpc, previous.cpc))}` : "暂无上月数据",
+      delta: previous ? change(current.cpc, previous.cpc) : null,
+      direction: "reverse",
     },
     {
       name: "广告TACOS",
       value: formatPercent(current.tacos),
       detail: previous
         ? `较${previous.label}${(pointChange(current.tacos, previous.tacos) * 100).toFixed(2)}个百分点`
-        : "暂无上周数据",
+        : "暂无上月数据",
       delta: previous ? change(current.tacos, previous.tacos) : null,
       direction: "reverse",
     },
@@ -562,13 +597,13 @@ function recommendedIssues() {
     }
   };
 
-  if (change(current.sessionsDaily, previous.sessionsDaily) <= -0.08) add("访客||下降");
+  if (change(current.sessions, previous.sessions) <= -0.08) add("访客||下降");
   if (change(current.cvr, previous.cvr) <= -0.08) add("综合转化率||下降");
   if (change(current.ctr, previous.ctr) <= -0.08) add("广告点击率||下降");
   if (change(current.adCvr, previous.adCvr) <= -0.08) add("广告转化率||下降");
   if (pointChange(current.tacos, previous.tacos) >= 0.01 || current.tacos >= 0.12) add("广告TACOS||占比高");
 
-  if (change(current.salesDaily, previous.salesDaily) <= -0.1 && !recommendations.length) {
+  if (change(current.sales, previous.sales) <= -0.1 && !recommendations.length) {
     add("综合转化率||下降");
   }
 
@@ -638,6 +673,7 @@ function addAnalysisItem(initial = {}) {
           <label>原因维度</label>
           <select class="analysis-issue">${issueOptions(issueKey)}</select>
         </div>
+        <div class="product-data-panel field-wide"></div>
         <div class="field field-wide">
           <label>差距分析（从运营项目周报选择原因）</label>
           <select class="analysis-reason"></select>
@@ -668,10 +704,67 @@ function addAnalysisItem(initial = {}) {
 
   const element = $("analysisList").querySelector(`[data-id="${id}"]`);
   element.querySelector(".remove-analysis").addEventListener("click", () => element.remove());
+  element.querySelector(".analysis-product").addEventListener("change", () => renderProductData(element));
   element.querySelector(".analysis-issue").addEventListener("change", () => refreshAnalysisItem(element));
   element.querySelector(".action-category").addEventListener("change", () => refreshActionSelect(element, "action"));
   element.querySelector(".plan-category").addEventListener("change", () => refreshActionSelect(element, "plan"));
   refreshAnalysisItem(element);
+  renderProductData(element);
+}
+
+function metricChangeText(currentValue, previousValue, points = false) {
+  if (!state.previous || previousValue === undefined || previousValue === null) return "无上月数据";
+  if (points) {
+    const value = pointChange(currentValue, previousValue);
+    return `${value > 0 ? "+" : ""}${(value * 100).toFixed(2)}个百分点`;
+  }
+  return formatChange(change(currentValue, previousValue));
+}
+
+function renderProductData(element) {
+  const productName = element.querySelector(".analysis-product").value;
+  const current = productName === "整体"
+    ? state.current
+    : state.current?.products.find((item) => item.name === productName);
+  const previous = productName === "整体"
+    ? state.previous
+    : state.previous?.products.find((item) => item.name === productName);
+  const panel = element.querySelector(".product-data-panel");
+
+  if (!current) {
+    panel.innerHTML = '<div class="empty">该产品在当前月份没有可用数据。</div>';
+    return;
+  }
+
+  const metrics = [
+    ["GMV", formatMoney(current.sales), metricChangeText(current.sales, previous?.sales)],
+    ["销量", `${formatNumber(current.units)}件`, metricChangeText(current.units, previous?.units)],
+    ["客单价", formatMoney(current.aov), metricChangeText(current.aov, previous?.aov)],
+    ["一级利润率", formatPercent(current.primaryMargin), metricChangeText(current.primaryMargin, previous?.primaryMargin, true)],
+    ["二级利润率", formatPercent(current.margin), metricChangeText(current.margin, previous?.margin, true)],
+    ["TACOS", formatPercent(current.tacos), metricChangeText(current.tacos, previous?.tacos, true)],
+    ["访客", formatNumber(current.sessions), metricChangeText(current.sessions, previous?.sessions)],
+    ["综合转化率", formatPercent(current.cvr), metricChangeText(current.cvr, previous?.cvr)],
+    ["广告CTR", formatPercent(current.ctr), metricChangeText(current.ctr, previous?.ctr)],
+    ["CPC", formatMoney(current.cpc), metricChangeText(current.cpc, previous?.cpc)],
+    ["广告转化率", formatPercent(current.adCvr), metricChangeText(current.adCvr, previous?.adCvr)],
+  ];
+
+  panel.innerHTML = `
+    <div class="product-data-title">
+      <strong>${escapeHtml(productName)}｜${escapeHtml(state.current.label)}月度数据</strong>
+      <span>对比 ${escapeHtml(state.previous?.label || "上月")}</span>
+    </div>
+    <div class="mini-kpi-grid">
+      ${metrics.map(([label, value, delta]) => `
+        <div class="mini-kpi">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+          <small>${escapeHtml(delta)}</small>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function bankItemFor(element) {
@@ -731,8 +824,13 @@ function selectedMetrics() {
 function selectedAnalysis() {
   return [...$("analysisList").querySelectorAll(".analysis-item")].map((element) => {
     const item = bankItemFor(element);
+    const product = element.querySelector(".analysis-product").value;
+    const productData = product === "整体"
+      ? state.current
+      : state.current?.products.find((entry) => entry.name === product);
     return {
-      product: element.querySelector(".analysis-product").value,
+      product,
+      productData,
       dimension: item.dimension,
       issue: item.issue,
       reason: element.querySelector(".analysis-reason").value,
@@ -748,9 +846,7 @@ function selectedAnalysis() {
 function autoProgressText() {
   if (!state.current) return "尚未上传绩效复盘表。";
   const current = state.current;
-  const month = state.month;
-  return `${current.label}完成GMV ${formatMoney(current.sales)}、销量 ${formatNumber(current.units)}，二级利润率 ${formatPercent(current.margin)}，TACOS ${formatPercent(current.tacos)}。`
-    + `${state.monthLabel}累计GMV ${formatMoney(month.sales)}、销量 ${formatNumber(month.units)}，二级利润率 ${formatPercent(month.margin)}。`;
+  return `${current.label}累计完成GMV ${formatMoney(current.sales)}、销量 ${formatNumber(current.units)}，一级利润率 ${formatPercent(current.primaryMargin)}、二级利润率 ${formatPercent(current.margin)}、TACOS ${formatPercent(current.tacos)}、CPC ${formatMoney(current.cpc)}。`;
 }
 
 function buildComparisonRows() {
@@ -761,11 +857,13 @@ function buildComparisonRows() {
     ["GMV", formatMoney(current.sales), previous ? formatMoney(previous.sales) : "-"],
     ["销量", formatNumber(current.units), previous ? formatNumber(previous.units) : "-"],
     ["平均客单价", formatMoney(current.aov), previous ? formatMoney(previous.aov) : "-"],
+    ["一级利润率", formatPercent(current.primaryMargin), previous ? formatPercent(previous.primaryMargin) : "-"],
     ["二级利润率", formatPercent(current.margin), previous ? formatPercent(previous.margin) : "-"],
     ["TACOS", formatPercent(current.tacos), previous ? formatPercent(previous.tacos) : "-"],
     ["访客 / 会话", formatNumber(current.sessions), previous ? formatNumber(previous.sessions) : "-"],
     ["综合转化率", formatPercent(current.cvr), previous ? formatPercent(previous.cvr) : "-"],
     ["广告CTR", formatPercent(current.ctr), previous ? formatPercent(previous.ctr) : "-"],
+    ["CPC", formatMoney(current.cpc), previous ? formatMoney(previous.cpc) : "-"],
     ["广告转化率", formatPercent(current.adCvr), previous ? formatPercent(previous.adCvr) : "-"],
   ];
 }
@@ -777,10 +875,46 @@ function groupedList(items, categoryKey, textKey) {
   })).filter((group) => group.items.length);
   if (!groups.length) return "<p>（请选择具体内容）</p>";
   return groups.map((group) => `
-    <p><strong>${escapeHtml(group.category)}</strong></p>
-    <ul>${group.items.map((item) => `
-      <li>${escapeHtml(item.product)}：${escapeHtml(item[textKey])}${item.note ? `；补充：${escapeHtml(item.note)}` : ""}</li>
-    `).join("")}</ul>
+    <div class="report-action-group">
+      <div class="report-action-category">${escapeHtml(group.category)}</div>
+      ${group.items.map((item) => `
+        <div class="report-action-item">
+          <strong>${escapeHtml(item.product)}</strong>
+          <span>${escapeHtml(item[textKey])}${item.note ? `；补充：${escapeHtml(item.note)}` : ""}</span>
+        </div>
+      `).join("")}
+    </div>
+  `).join("");
+}
+
+function executiveConclusion() {
+  if (!state.current) return "尚未上传绩效复盘表。";
+  if (!state.previous) {
+    return `${state.current.label}累计GMV ${formatMoney(state.current.sales)}，二级利润率 ${formatPercent(state.current.margin)}，TACOS ${formatPercent(state.current.tacos)}。`;
+  }
+  const salesChange = change(state.current.sales, state.previous.sales);
+  const marginChange = pointChange(state.current.margin, state.previous.margin);
+  const tacosChange = pointChange(state.current.tacos, state.previous.tacos);
+  return `${state.current.label}GMV较${state.previous.label}${formatChange(salesChange)}，二级利润率${marginChange >= 0 ? "提升" : "下降"}${Math.abs(marginChange * 100).toFixed(2)}个百分点，TACOS${tacosChange <= 0 ? "下降" : "上升"}${Math.abs(tacosChange * 100).toFixed(2)}个百分点。`;
+}
+
+function productDiagnosisRows(analysis) {
+  const unique = new Map();
+  analysis.forEach((item) => {
+    if (!item.productData || unique.has(item.product)) return;
+    unique.set(item.product, item.productData);
+  });
+  return [...unique.entries()].map(([product, data]) => `
+    <tr>
+      <td>${escapeHtml(product)}</td>
+      <td>${escapeHtml(formatMoney(data.sales))}</td>
+      <td>${escapeHtml(formatNumber(data.units))}</td>
+      <td>${escapeHtml(formatPercent(data.primaryMargin))}</td>
+      <td>${escapeHtml(formatPercent(data.margin))}</td>
+      <td>${escapeHtml(formatPercent(data.tacos))}</td>
+      <td>${escapeHtml(formatPercent(data.cvr))}</td>
+      <td>${escapeHtml(formatMoney(data.cpc))}</td>
+    </tr>
   `).join("");
 }
 
@@ -790,59 +924,117 @@ function generateReport() {
   const target = $("target").value.trim() || "（请填写本月目标）";
   const progress = $("progress").value.trim();
   const period = state.current
-    ? `${state.monthLabel} ${state.current.label}（数据截至 ${formatDate(state.latestDate)}）`
+    ? `${state.current.label}经营数据（截至 ${formatDate(state.latestDate)}）`
     : "未上传数据";
   const comparisonRows = buildComparisonRows();
+  const diagnosisRows = productDiagnosisRows(analysis);
 
   $("report").innerHTML = `
-    <h1>运营项目周报</h1>
-    <div class="report-period">${escapeHtml(period)}</div>
+    <div class="report-shell">
+      <header class="report-header">
+        <div class="report-kicker">WEEKLY OPERATIONS REVIEW</div>
+        <h1>运营项目周报</h1>
+        <div class="report-period">${escapeHtml(period)}</div>
+        <div class="report-source">月度累计口径｜每日及周度明细汇总</div>
+      </header>
+      <div class="report-body">
+        <section class="report-section">
+          <h2>一、经营结论</h2>
+          <div class="report-highlight">
+            <strong>核心结论</strong>
+            <p>${escapeHtml(executiveConclusion())}</p>
+          </div>
+          <div class="report-kpi-grid">
+            <div class="report-kpi"><span>月度GMV</span><strong>${escapeHtml(formatMoney(state.current?.sales))}</strong><small>${escapeHtml(state.previous ? formatChange(change(state.current.sales, state.previous.sales)) : "无上月数据")}</small></div>
+            <div class="report-kpi"><span>一级利润率</span><strong>${escapeHtml(formatPercent(state.current?.primaryMargin))}</strong><small>${escapeHtml(state.previous ? metricChangeText(state.current.primaryMargin, state.previous.primaryMargin, true) : "无上月数据")}</small></div>
+            <div class="report-kpi"><span>二级利润率</span><strong>${escapeHtml(formatPercent(state.current?.margin))}</strong><small>${escapeHtml(state.previous ? metricChangeText(state.current.margin, state.previous.margin, true) : "无上月数据")}</small></div>
+            <div class="report-kpi"><span>TACOS</span><strong>${escapeHtml(formatPercent(state.current?.tacos))}</strong><small>${escapeHtml(state.previous ? metricChangeText(state.current.tacos, state.previous.tacos, true) : "无上月数据")}</small></div>
+          </div>
+        </section>
 
-    <h3>一、本月目标</h3>
-    <p>${escapeHtml(target)}</p>
-
-    <h3>二、本周完成进度</h3>
-    <p>${escapeHtml(progress || autoProgressText())}</p>
-    ${comparisonRows.length ? `
-      <table class="data-table">
+        <section class="report-section">
+          <h2>二、目标与完成进度</h2>
+          <h3>本月目标</h3>
+          <p>${escapeHtml(target)}</p>
+          <h3>本周完成进度</h3>
+          <p>${escapeHtml(progress || autoProgressText())}</p>
+          ${comparisonRows.length ? `
+            <table class="data-table">
         <thead>
           <tr>
             <th>指标</th>
             <th>${escapeHtml(state.current.label)}</th>
-            <th>${escapeHtml(state.previous?.label || "对比周")}</th>
+            <th>${escapeHtml(state.previous?.label || "上月")}</th>
           </tr>
         </thead>
         <tbody>
           ${comparisonRows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}
         </tbody>
       </table>
-    ` : ""}
+          ` : ""}
+        </section>
 
-    <h3>三、主要指标波动</h3>
-    ${metrics.length ? `<ul>${metrics.map((metric) => `
-      <li><strong>${escapeHtml(metric.title)}</strong>${metric.detail ? `，${escapeHtml(metric.detail)}` : ""}${metric.note ? `；补充：${escapeHtml(metric.note)}` : ""}</li>
-    `).join("")}</ul>` : "<p>（请勾选主要指标波动）</p>"}
+        <section class="report-section">
+          <h2>三、经营公式与指标波动</h2>
+          <div class="report-formula">
+            <p><strong>利润率</strong> = 利润额 ÷ 总销售额 =（总销售额 - 各项支出）÷ 总销售额 = 1 - 各项支出 ÷ 总销售额</p>
+            <p><strong>销售额</strong> = 曝光 × 点击率 × 转化率 × 客单价 = 销量 × 客单价</p>
+            <p><strong>销量</strong> = 流量 × 转化率</p>
+            <p><strong>TACOS</strong> = 广告费 ÷ 总销售额 ≈ CPC ÷（客单价 × 广告转化率）</p>
+          </div>
+          ${metrics.length ? `<div class="report-metric-list">${metrics.map((metric, index) => `
+            <div class="report-metric-item">
+              <span class="priority priority-p${Math.min(index + 1, 3)}">P${index + 1}</span>
+              <div><strong>${escapeHtml(metric.title)}</strong><p>${metric.detail ? escapeHtml(metric.detail) : ""}${metric.note ? `；补充：${escapeHtml(metric.note)}` : ""}</p></div>
+            </div>
+          `).join("")}</div>` : "<p>（请勾选主要指标波动）</p>"}
+        </section>
 
-    <h3>四、差距分析（遇到的问题）</h3>
-    ${analysis.length ? `<ul>${analysis.map((item) => `
-      <li><strong>【${escapeHtml(item.product)}｜${escapeHtml(item.dimension)} / ${escapeHtml(item.issue)}】</strong>${escapeHtml(item.reason)}${item.note ? `；补充：${escapeHtml(item.note)}` : ""}</li>
-    `).join("")}</ul>` : "<p>（请新增并选择分析项）</p>"}
+        <section class="report-section">
+          <h2>四、产品数据诊断</h2>
+          ${diagnosisRows ? `
+            <table class="data-table">
+              <thead><tr><th>产品</th><th>GMV</th><th>销量</th><th>一级利润率</th><th>二级利润率</th><th>TACOS</th><th>转化率</th><th>CPC</th></tr></thead>
+              <tbody>${diagnosisRows}</tbody>
+            </table>
+          ` : "<p>（选择分析项中的产品后生成产品数据诊断）</p>"}
+        </section>
 
-    <h3>五、关键动作</h3>
-    ${groupedList(analysis, "actionCategory", "action")}
+        <section class="report-section">
+          <h2>五、核心问题归因</h2>
+          ${analysis.length ? `<div class="report-cause-list">${analysis.map((item, index) => `
+            <div class="report-cause">
+              <span class="priority priority-p${Math.min(index + 1, 3)}">P${index + 1}</span>
+              <div>
+                <strong>${escapeHtml(item.product)}｜${escapeHtml(item.dimension)} / ${escapeHtml(item.issue)}</strong>
+                <p>${escapeHtml(item.reason)}${item.note ? `；补充：${escapeHtml(item.note)}` : ""}</p>
+              </div>
+            </div>
+          `).join("")}</div>` : "<p>（请新增并选择分析项）</p>"}
+        </section>
 
-    <h3>六、下周计划（接下来怎么做）</h3>
-    ${groupedList(analysis, "planCategory", "plan")}
+        <section class="report-section">
+          <h2>六、关键动作</h2>
+          ${groupedList(analysis, "actionCategory", "action")}
+        </section>
 
-    <h3>七、说明</h3>
-    <p>数据来源：${escapeHtml(state.fileName || "绩效复盘表")}；原因、关键动作及下周计划选项来源：《运营项目周报.xlsx》。</p>
+        <section class="report-section">
+          <h2>七、下周行动计划</h2>
+          ${groupedList(analysis, "planCategory", "plan")}
+        </section>
+
+        <section class="report-section report-note">
+          <h2>八、数据说明</h2>
+          <p>数据来源：${escapeHtml(state.fileName || "绩效复盘表")}；原因、关键动作及下周计划选项来源：《运营项目周报.xlsx》。</p>
+        </section>
+      </div>
+    </div>
   `;
 }
 
 function reportFileName(extension) {
   const month = state.monthLabel || "未命名月份";
-  const week = state.current?.label || "周报";
-  return `运营项目周报_${month}_${week}.${extension}`;
+  return `运营项目周报_${month}.${extension}`;
 }
 
 function ensureReport() {
@@ -866,10 +1058,15 @@ function downloadWord() {
     <head>
       <meta charset="utf-8">
       <style>
-        body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#202939;line-height:1.65;padding:28px}
-        h1{text-align:center}h3{color:#173d92;border-bottom:2px solid #dce7ff;padding-bottom:6px}
-        table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccd3df;padding:8px;text-align:left}
-        th{background:#f1f5fb}li{margin:5px 0}
+        body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#202939;line-height:1.65;margin:0}
+        .report-header{padding:32px;color:#fff;text-align:center;background:#1a365d}.report-header h1{margin:4px 0}.report-kicker{color:#f4ca6b}
+        .report-body{padding:28px}.report-section{margin-bottom:28px}.report-section>h2{color:#1a365d;border-bottom:3px solid #e8a838;padding-bottom:7px}
+        .report-highlight,.report-formula{padding:14px;border-left:5px solid #e8a838;background:#fff3cd}
+        .report-kpi-grid{display:table;width:100%;table-layout:fixed}.report-kpi{display:table-cell;padding:12px;text-align:center;background:#f1f3f5;border:4px solid #fff}
+        .report-kpi span,.report-kpi strong,.report-kpi small{display:block}.report-kpi strong{color:#1a365d;font-size:20px}
+        table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #ccd3df;padding:8px;text-align:left}
+        th{color:#fff;background:#1a365d}.report-metric-item,.report-cause,.report-action-item{padding:10px;margin:7px 0;border-left:4px solid #e8a838;background:#f8f9fa}
+        .priority{font-weight:bold;color:#b42318;margin-right:8px}.report-action-category{color:#1a365d;font-weight:bold}
       </style>
     </head>
     <body>${$("report").innerHTML}</body>
@@ -897,33 +1094,10 @@ function loadSampleState() {
   const sample = {
     latestDate: new Date(2026, 3, 30),
     monthLabel: "2026年4月",
-    previous: sampleAggregate("第三周", 2, 7, {
-      units: 78,
-      sales: 76254.99,
-      profit: 3894.69,
-      adFee: 4303.27,
-      sessions: 19433,
-      impressions: 356205,
-      clicks: 2512,
-      adOrders: 28,
-      adSpend: 3586.17,
-      adSales: 13965.39,
-    }),
-    current: sampleAggregate("第四周", 3, 9, {
-      units: 82,
-      sales: 63448.9,
-      profit: 2941.43,
-      adFee: 5608.6,
-      sessions: 23718,
-      impressions: 417794,
-      clicks: 3266,
-      adOrders: 49,
-      adSpend: 4719.58,
-      adSales: 19703.57,
-    }),
     month: sampleAggregate("2026年4月", -1, 30, {
       units: 313,
       sales: 268020.64,
+      primaryProfit: 37263.67,
       profit: 13790.19,
       adFee: 18344.97,
       sessions: 78483,
@@ -933,16 +1107,42 @@ function loadSampleState() {
       adSpend: 15542.69,
       adSales: 66925.16,
     }),
+    previousMonth: sampleAggregate("2026年3月", -2, 31, {
+      units: 332,
+      sales: 292565.1,
+      primaryProfit: 39265.1,
+      profit: 20330.42,
+      adFee: 17620.3,
+      sessions: 75320,
+      impressions: 1814000,
+      clicks: 14280,
+      adOrders: 168,
+      adSpend: 16020.5,
+      adSales: 70120.2,
+    }),
+    currentWeek: sampleAggregate("第四周", 3, 9, {
+      units: 82,
+      sales: 63448.9,
+      primaryProfit: 10162.73,
+      profit: 2941.43,
+      adFee: 5608.6,
+      sessions: 23718,
+      impressions: 417794,
+      clicks: 3266,
+      adOrders: 49,
+      adSpend: 4719.58,
+      adSales: 19703.57,
+    }),
+    previousWeek: null,
   };
-  const productNames = ["产品1", "产品4", "产品13", "产品18", "产品25", "产品26", "产品28"];
-  sample.month.products = productNames.map((name) => ({ name }));
-  sample.current.products = [
-    { name: "产品1", sales: 23432.05, tacos: 0.0809 },
-    { name: "产品4", sales: 19417.94, tacos: 0.0505 },
-    { name: "产品18", sales: 4021.28, tacos: 0.2164 },
-    { name: "产品26", sales: 3591.98, tacos: 0.217 },
-    { name: "产品25", sales: 1076.12, tacos: 0.4438 },
+  sample.month.products = [
+    sampleProduct("产品1", 102, 114960.51, 20265, -1813.81, 6989.78, 42748, 708988, 5094, 50, 6989.78),
+    sampleProduct("产品4", 49, 61789.61, 10630, 2576.36, 2466.39, 11744, 286870, 1526, 28, 2466.39),
+    sampleProduct("产品18", 44, 11392.22, 3020, 902.11, 1936.07, 11868, 224943, 2044, 22, 1936.07),
+    sampleProduct("产品26", 28, 9795.69, 2510, 505.83, 1198.59, 3991, 91797, 1007, 18, 1198.59),
+    sampleProduct("产品25", 17, 4817.83, 940, -309.81, 1141.97, 2372, 226439, 1729, 11, 1141.97),
   ];
+  sample.previousMonth.products = sample.month.products.map((item) => ({ ...item }));
   state.fileName = "绩效复盘表格优化-白板6.15.xlsx";
   applyAnalysisResult(sample);
   setStatus("已载入基于你提供表格的示例状态。正式使用时请上传绩效复盘表。", "success");
@@ -951,15 +1151,36 @@ function loadSampleState() {
 function sampleAggregate(label, index, dayCount, values) {
   const result = { label, index, dayCount, products: [], ...values };
   result.aov = result.units ? result.sales / result.units : 0;
+  result.primaryMargin = result.sales ? result.primaryProfit / result.sales : 0;
   result.margin = result.sales ? result.profit / result.sales : 0;
   result.tacos = result.sales ? result.adFee / result.sales : 0;
   result.cvr = result.sessions ? result.units / result.sessions : 0;
   result.ctr = result.impressions ? result.clicks / result.impressions : 0;
   result.adCvr = result.clicks ? result.adOrders / result.clicks : 0;
+  result.cpc = result.clicks ? result.adSpend / result.clicks : 0;
   result.acos = result.adSales ? result.adSpend / result.adSales : 0;
   result.salesDaily = result.sales / dayCount;
   result.unitsDaily = result.units / dayCount;
   result.sessionsDaily = result.sessions / dayCount;
   result.impressionsDaily = result.impressions / dayCount;
   return result;
+}
+
+function sampleProduct(name, units, sales, primaryProfit, profit, adFee, sessions, impressions, clicks, adOrders, adSpend) {
+  return {
+    ...sampleAggregate(name, -1, 30, {
+      units,
+      sales,
+      primaryProfit,
+      profit,
+      adFee,
+      sessions,
+      impressions,
+      clicks,
+      adOrders,
+      adSpend,
+      adSales: sales * 0.25,
+    }),
+    name,
+  };
 }

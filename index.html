@@ -15,7 +15,7 @@
       <div>
         <p class="eyebrow">WEEKLY OPERATIONS REVIEW</p>
         <h1>运营项目周报生成工具</h1>
-        <p>只上传《绩效复盘表格优化-白板6.15》同结构文件，自动分析最新月份和最新周。原因、关键动作与下周计划均从《运营项目周报》选项库中选择。</p>
+        <p>只上传《绩效复盘表格优化-白板6.15》同结构文件，按月汇总每日及周度数据。原因、关键动作与下周计划均从《运营项目周报》选项库中选择。</p>
       </div>
       <div class="hero-badge">
         <strong>单文件上传</strong>
@@ -36,7 +36,7 @@
         <span class="upload-icon">XLSX</span>
         <span>
           <strong>点击选择绩效复盘表</strong>
-          <small>优先读取“每日数据”，按最新日期自动确定月份和周次</small>
+          <small>优先读取“每日数据”，自动汇总最新月份并与上月对比</small>
         </span>
       </label>
       <div id="status" class="status muted">尚未上传文件</div>
@@ -72,7 +72,16 @@
         </div>
         <button id="addMetric" class="button ghost" type="button">新增自定义指标</button>
       </div>
-      <p class="help">总量指标在周长度不同时按日均环比，比例指标直接环比。勾选后写入报告，可在每项后补充业务说明。</p>
+      <p class="help">以下指标均为最新整月累计，并与上月进行环比。勾选后写入报告，可在每项后补充业务说明。</p>
+      <div class="formula-panel">
+        <strong>核心经营公式</strong>
+        <div class="formula-grid">
+          <span>利润率 = 利润额 ÷ 总销售额 =（总销售额 - 各项支出）÷ 总销售额 = 1 - 各项支出 ÷ 总销售额</span>
+          <span>销售额 = 曝光 × 点击率 × 转化率 × 客单价 = 销量 × 客单价</span>
+          <span>销量 = 流量 × 转化率</span>
+          <span>TACOS = 广告费 ÷ 总销售额 ≈ CPC ÷（客单价 × 广告转化率）</span>
+        </div>
+      </div>
       <div id="metrics" class="empty">上传文件后自动生成指标波动。</div>
     </section>
 

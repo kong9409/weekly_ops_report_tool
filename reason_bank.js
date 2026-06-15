@@ -1,4 +1,4 @@
-[
+window.REASON_BANK=[
   {
     "dimension": "访客",
     "issue": "下降",
@@ -304,3 +304,4 @@
     ]
   }
 ]
+;

@@ -1,1 +1,120 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>运营周报生成工具 v2</title><script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><style>*{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#172033;font-family:"Microsoft YaHei",Arial,sans-serif;line-height:1.55}.page{max-width:1160px;margin:auto;padding:26px}.hero{background:linear-gradient(135deg,#172033,#1d4ed8);color:#fff;border-radius:24px;padding:30px;margin-bottom:18px}.hero h1{margin:0;font-size:30px}.hero p{color:#dbeafe}.card{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:18px;margin-bottom:16px;box-shadow:0 8px 22px rgba(15,23,42,.05)}h2{margin:4px 0 14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}.three{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}label{display:block;font-weight:700;margin:10px 0 6px}textarea,input,select{width:100%;border:1px solid #cbd5e1;border-radius:12px;padding:10px;font:inherit;background:#fff}button{background:#2563eb;color:#fff;border:0;border-radius:12px;padding:10px 16px;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:#0f172a}button.ghost{background:#eef2ff;color:#1d4ed8}.small{font-size:12px;color:#64748b}.ok{color:#047857}.err{color:#b91c1c}.kpi{background:#f8fafc;border:1px solid #e5e7eb;border-radius:14px;padding:12px}.kpi b{display:block;font-size:21px;color:#0f172a}.option{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin:10px 0;background:#fff}.option input[type=checkbox]{width:auto;margin-right:8px}.filters{display:grid;grid-template-columns:180px 1fr;gap:12px}.output{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:16px;padding:16px;min-height:280px;overflow:auto}.hint{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:14px;padding:12px}@media(max-width:860px){.two,.three,.filters{grid-template-columns:1fr}.page{padding:14px}}</style></head><body><div class="page"><section class="hero"><h1>运营周报生成工具（原因选项库版 v2）</h1><p>修复原因选择不显示、不能运行的问题；新增关键动作分类/原因维度下拉框。只上传绩效表，本月目标和本周完成进度手动输入，其余从《运营项目周报》原因库勾选。</p></section><section class="card"><h2>1. 上传绩效表</h2><input type="file" id="file" accept=".xlsx,.xls"><p class="small">上传后自动读取“每日数据”或第一个工作表，汇总销售额、销量、毛利率、TACOS、访客、转化率、广告CTR、广告转化率。</p><div id="status" class="small"></div><div id="summary" class="three"></div></section><section class="two"><div class="card"><h2>2. 手动输入</h2><label>本月目标</label><textarea id="target" rows="6" placeholder="本月GMV/利润率/TACOS/重点产品目标……"></textarea><label>本周完成进度</label><textarea id="progress" rows="9" placeholder="本周销售额、销量、利润率、产品推进情况……"></textarea></div><div class="card"><h2>3. 选择本周主要指标波动</h2><button class="ghost" onclick="addManualMetric()">手动新增指标波动</button><div id="metrics" class="hint small">上传绩效表后自动生成异常指标，也可以手动新增。</div></div></section><section class="card"><h2>4. 勾选原因、关键动作、下周计划</h2><div class="filters"><div><label>关键动作分类</label><select id="cat" onchange="renderBank()"><option>全部</option><option>市场</option><option>竞品</option><option>产品</option><option>广告</option><option>售后</option><option>其他</option></select></div><div><label>原因维度</label><select id="dim" onchange="renderBank()"></select></div></div><div id="bank"></div></section><section class="card"><h2>5. 生成周报</h2><button onclick="generateReport()">生成周报草稿</button><button class="secondary" onclick="downloadTxt()">下载TXT</button><button class="ghost" onclick="copyReport()">复制</button><div id="output" class="output"></div></section></div><script>const OPTION_BANK=[{"dimension": "访客", "issue": "下降", "check_methods": "1. 检查核心关键词排名的稳定性；\n2. 反查流量入口是否变动（亚马逊收录的前三页，魔词和卖家精灵查询）\n3. 检查是否因为广告转化率下降拉低了关键词排名，导致访客变少\n4. 检查是否因为涨价，整体转化率下降，销量下降，整体关键词排名下降\n5. 检查是否因为点击率下降，导致访客下降；\n6. 检查是否活动结束，活动流量入口关闭\n7. 检查是否同行加大流量抢占（广告位置竞争/同行低价活动/同行促销活动）\n8. 检查Listing时候有侵权，违规等导致整体流量降权\n9. 检查整体流量大盘情况和同行销量情况", "thinking": "增加流量入口（关键词排名/活动/同行关联/站外入口等）", "options": ["增加广告预算/增加广告投放词/投放ASIN", "降低Bid,有限预算下增加点击访客", "投放站外促销", "参加站内LD/7促", "添加Coupon,增加Coupon页面入口", "做Post,增加流量", "广告主打核心关键词并持续出单，关键词上首页", "设置关联Promotion，增加产品关联"], "categories": ["市场", "竞品", "广告"], "action_options": [{"text": "增加广告预算/增加广告投放词/投放ASIN", "category": "广告"}, {"text": "降低Bid,有限预算下增加点击访客", "category": "广告"}, {"text": "投放站外促销", "category": "广告"}, {"text": "参加站内LD/7促", "category": "市场"}, {"text": "添加Coupon,增加Coupon页面入口", "category": "市场"}, {"text": "做Post,增加流量", "category": "市场"}, {"text": "广告主打核心关键词并持续出单，关键词上首页", "category": "广告"}, {"text": "设置关联Promotion，增加产品关联", "category": "其他"}]}, {"dimension": "综合转化率", "issue": "下降", "check_methods": "1. 检查价格调整是否高于同行平均，导致转化下降（尤其是标品）\n2. 检查关键的属性：比如变体颜色/尺寸等问题\n3. 检查是否有断货，断码等情况\n4. 检查促销活动，折扣等结束的影响\n5. 检查图片/描述/标题等核心属性的定位修改是否有问题\n6. 检查广告流量的精准性，避免垃圾流量（是否拉低转化率）\n7. 检查埋词情况，整体收录流量词是否精准，避免垃圾流量\n8. 检查其他流量入口流量的精准性                                                        9. 检查review和Rating是否下降\n10.检查类目是否有问题", "thinking": "价格优化/标题文案核心属性问题/流量的相关度和精准度", "options": ["优化核心文案和属性（定位问题）", "关闭无效点击的广告或降低bid", "和同行比较价格/活动等原因/适度降价或促销", "检查促销按钮/划线价等是否有影响", "断货/断码导致的情况，迅速补货/自发货维持等", "流量反查垃圾流量的相关度，剔除/优化埋词情况", "优化评论和Rating/首页无差评操作", "调整类目"], "categories": ["产品", "竞品", "广告", "售后"], "action_options": [{"text": "优化核心文案和属性（定位问题）", "category": "产品"}, {"text": "关闭无效点击的广告或降低bid", "category": "广告"}, {"text": "和同行比较价格/活动等原因/适度降价或促销", "category": "竞品"}, {"text": "检查促销按钮/划线价等是否有影响", "category": "竞品"}, {"text": "断货/断码导致的情况，迅速补货/自发货维持等", "category": "其他"}, {"text": "流量反查垃圾流量的相关度，剔除/优化埋词情况", "category": "产品"}, {"text": "优化评论和Rating/首页无差评操作", "category": "产品"}, {"text": "调整类目", "category": "产品"}]}, {"dimension": "广告点击率", "issue": "下降", "check_methods": "1. 检查广告位的情况; 关键词首页/详情页/关键词搜索剩余页面的点击率情况\n2. 检查投放词的精准度/搜索词的精准度\n3. 检查主图的情况\n4. 检查价格因素/促销按钮/活动标签等结束的影响\n5. 检查核心文案信息的变动等", "thinking": "核心因素：价格/广告/促销按钮等", "options": ["优化主图", "优化标题前一段核心信息", "优化广告投放位置/Top of Search 相对点击率高；详情页和Rest of Search 相对较差", "广告投放页同行竞争分析，来优化价格"], "categories": ["广告", "产品", "竞品"], "action_options": [{"text": "优化主图", "category": "产品"}, {"text": "优化标题前一段核心信息", "category": "产品"}, {"text": "优化广告投放位置/Top of Search 相对点击率高；详情页和Rest of Search 相对较差", "category": "广告"}, {"text": "广告投放页同行竞争分析，来优化价格", "category": "广告"}]}, {"dimension": "广告转化率", "issue": "下降", "check_methods": "1. 检查价格调整是否高于同行平均，导致转化下降（尤其是标品）\n2. 检查关键的属性：比如变体颜色/尺寸等问题\n3. 检查是否有断货，断码等情况\n4. 检查促销活动，折扣等结束的影响\n5. 检查图片/描述/标题等核心属性的定位修改是否有问题\n6. 检查投放词/搜索词的精准度，避免垃圾流量", "thinking": "广告投放词/搜索的精准度/价格/促销等", "options": ["参考综合转化率下降的优化方案选择执行", "优化广告投放位置/Top of Search 相对点击率高；详情页和Rest of Search 相对较差", "优化广告投放词/搜索词，否定无效的投放入口", "价格促销等因素的调控"], "categories": ["广告", "产品", "竞品"], "action_options": [{"text": "参考综合转化率下降的优化方案选择执行", "category": "其他"}, {"text": "优化广告投放位置/Top of Search 相对点击率高；详情页和Rest of Search 相对较差", "category": "广告"}, {"text": "优化广告投放词/搜索词，否定无效的投放入口", "category": "广告"}, {"text": "价格促销等因素的调控", "category": "竞品"}]}, {"dimension": "广告TACOS", "issue": "占比高", "check_methods": "A. 广告花费占比会影响毛利率，占比越小越好，代表广告的效能\nB. Tacos超过预算值或者较高说明广告效能差，广告依赖度高\n\n1. 检查广告投放词/搜索词在listing中的相关度权重（埋词权重是否正确）\n2. 检查广告转化投放词/搜索词的自然流量和收录是否提升\n3. 检查广告出单量的大小和稳定性，是否足以提升整体流量权重\n4. 检查是否需要调整投放词/和投放思路\n5. 检查广告出单是否全部来源于详情页,对关键词排名权重提升有限\n6. 检查自然位收录流量的情况（反查），以及竞争环境，竞品因素", "thinking": "广告投放效果对自然排名及流量入口的促进作用差", "options": ["检查广告投放词/搜索和文案埋词的权重/提高相关度", "降低预算，核心关键词主抓转化率和销量的持续稳定性（不断加权）", "通过渠道对核心关键词进行自然补单，提升权重", "研究同行整体广告占比情况/广告竞争度，避开核心词的高bid竞争", "重新调整关键词布局/定位", "调整到合适的类目"], "categories": ["广告", "市场", "竞品"], "action_options": [{"text": "检查广告投放词/搜索和文案埋词的权重/提高相关度", "category": "广告"}, {"text": "降低预算，核心关键词主抓转化率和销量的持续稳定性（不断加权）", "category": "广告"}, {"text": "通过渠道对核心关键词进行自然补单，提升权重", "category": "广告"}, {"text": "研究同行整体广告占比情况/广告竞争度，避开核心词的高bid竞争", "category": "广告"}, {"text": "重新调整关键词布局/定位", "category": "广告"}, {"text": "调整到合适的类目", "category": "产品"}]}, {"dimension": "库存管控", "issue": "断货前/后", "check_methods": "1. 检查货件计划到货和实际到货情况                                                       2. 检查船期的问题/下单出货时间是否合理                                           3. 检查是否因为价格原因、促销等因素造成前期销量预测错误                           4. 库存管理表系统的调整                                                               5. 检查亚马逊签收进度情况                                                                6. 检查供货逻辑问题", "thinking": "断货前预防断货/如何保持断货期间的listing权重和流量入口的相对稳定/避免下一个周期不断货", "options": ["预防：通过适当涨价等方案延缓销售节奏", "预防：通过降低广告预算等付费流向入口，延缓销售节奏", "预防：快速补货/调货", "补货后：加大广告预算和力度，配合合理的低价，快速提升销量，拉回权重-其他不变", "断货前：关闭listing/补货后：重启listing，按照新品流量扶持打广告", "促销降价"], "categories": ["其他", "产品"], "action_options": [{"text": "预防：通过适当涨价等方案延缓销售节奏", "category": "其他"}, {"text": "预防：通过降低广告预算等付费流向入口，延缓销售节奏", "category": "广告"}, {"text": "预防：快速补货/调货", "category": "其他"}, {"text": "补货后：加大广告预算和力度，配合合理的低价，快速提升销量，拉回权重-其他不变", "category": "广告"}, {"text": "断货前：关闭listing/补货后：重启listing，按照新品流量扶持打广告", "category": "广告"}, {"text": "促销降价", "category": "竞品"}]}, {"dimension": "库存管控", "issue": "冗余", "check_methods": "1. 检查是否因为断码情况产生                                                        2. 检查是否货件计划问题                                                            3. 检查是否销售预测问题                                                                  4. 如何提升销量的方向去做                                                                     5. 是否有航期仓储费风险，仓储成本过高的话，需要更快思路出货", "thinking": "促销活动/低价/站内外活动", "options": ["降价促销+配合广告大流量", "参加奥特莱斯/LD等", "核算成本-参加清货计划"], "categories": ["其他", "产品"], "action_options": [{"text": "降价促销+配合广告大流量", "category": "广告"}, {"text": "参加奥特莱斯/LD等", "category": "市场"}, {"text": "核算成本-参加清货计划", "category": "其他"}]}];let metricsTotal={},productIssues=[];const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));function toNum(v){let n=parseFloat(String(v??'').replace(/[$￥¥,%，\s]/g,''));return Number.isFinite(n)?n:0}function pct(x){return((Number(x)||0)*100).toFixed(2)+'%'}function money(x){return '$'+(Number(x)||0).toLocaleString(undefined,{maximumFractionDigits:2})}function init(){let dims=['全部',...new Set(OPTION_BANK.map(o=>o.dimension+' / '+o.issue))];$('dim').innerHTML=dims.map(x=>`<option>${esc(x)}</option>`).join('');renderBank()}document.addEventListener('DOMContentLoaded',init);function renderBank(){let cat=$('cat').value,dim=$('dim').value,list=OPTION_BANK.filter(o=>(cat==='全部'||(o.categories||[]).includes(cat)||(o.action_options||[]).some(a=>a.category===cat))&&(dim==='全部'||(o.dimension+' / '+o.issue)===dim));$('bank').innerHTML=list.map(o=>{let i=OPTION_BANK.indexOf(o);let actions=(o.action_options||[]).filter(a=>cat==='全部'||a.category===cat||(o.categories||[]).includes(cat));return `<div class="option"><label><input type="checkbox" class="reason" data-i="${i}">${esc(o.dimension)} / ${esc(o.issue)}</label><div class="small"><b>检查方法：</b>${esc(o.check_methods).replace(/\n/g,'<br>')}</div><div class="small"><b>执行思路：</b>${esc(o.thinking)}</div><b>关键动作 / 下周计划：</b>${actions.map(a=>`<label style="font-weight:400"><input type="checkbox" class="action" data-i="${i}" data-cat="${esc(a.category)}" data-text="${esc(a.text)}">【${esc(a.category)}】${esc(a.text)}</label>`).join('')}<label>补充说明</label><textarea class="note" data-i="${i}" rows="2" placeholder="补充具体产品、SKU、竞品、广告、库存、售后等事实"></textarea></div>`}).join('')||'<div class="hint small">暂无匹配选项，请切换下拉框。</div>'}function findHeader(rows){let best=0,score=-1;for(let r=0;r<Math.min(rows.length,12);r++){let t=rows[r].join('|');let s=['产品','SKU','销售额','销量','毛利','TACOS','访客','转化率','广告'].filter(k=>t.includes(k)).length;if(s>score){score=s;best=r}}return best}function hidx(header,names){let H=header.map(x=>String(x).replace(/[\s\n\r（）()：:%％$￥¥]/g,'').toLowerCase());for(let name of names){let n=name.replace(/[\s\n\r（）()：:%％$￥¥]/g,'').toLowerCase();let i=H.findIndex(h=>h===n||h.includes(n)||n.includes(h));if(i>=0)return i}return-1}function calc(o){o.pm=o.sales?o.profit/o.sales:0;o.tacos=o.sales?(o.spend/o.sales||o.tacos):o.tacos;o.cvr=o.sessions?(o.units/o.sessions||o.cvr):o.cvr;o.ctr=o.impr?(o.clicks/o.impr||o.ctr):o.ctr;o.adcvr=o.clicks?(o.orders/o.clicks||o.adcvr):o.adcvr;return o}$('file').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;try{if(typeof XLSX==='undefined')throw new Error('SheetJS未加载，请联网或部署后再打开。');$('status').innerHTML='正在读取……';let wb=XLSX.read(await f.arrayBuffer(),{type:'array'}),sn=wb.SheetNames.find(n=>n.includes('每日数据'))||wb.SheetNames[0],rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:''}),hr=findHeader(rows),head=rows[hr];let ix={p:hidx(head,['产品','产品名称','品名','SKU','MSKU','ASIN']),sales:hidx(head,['销售额','销售收入','GMV']),units:hidx(head,['销量','销售数量','订单量']),profit:hidx(head,['二级毛利额','利润额','毛利额','利润']),spend:hidx(head,['广告花费','广告费','Spend']),sessions:hidx(head,['访客','Sessions','访客数']),impr:hidx(head,['广告曝光','曝光量','Impressions']),clicks:hidx(head,['广告点击','点击量','Clicks']),orders:hidx(head,['广告订单','Orders']),adSales:hidx(head,['广告销售额','AdSales']),tacos:hidx(head,['TACOS']),cvr:hidx(head,['转化率','CVR','综合转化率']),ctr:hidx(head,['广告CTR','CTR','点击率']),adcvr:hidx(head,['广告转化率','AdCVR'])};let fb={p:2,units:14,sales:16,profit:32,sessions:59,impr:66,clicks:67,orders:70,spend:72,adSales:73},total={sales:0,units:0,profit:0,spend:0,sessions:0,impr:0,clicks:0,orders:0,adSales:0,tacos:0,cvr:0,ctr:0,adcvr:0},prod={};function val(row,k){let j=ix[k]>=0?ix[k]:fb[k];return row[j]}for(let r=hr+1;r<rows.length;r++){let row=rows[r],p=String(val(row,'p')||'').trim();if(!p||p==='合计'||p==='总计')continue;let it=prod[p]||(prod[p]={sales:0,units:0,profit:0,spend:0,sessions:0,impr:0,clicks:0,orders:0,adSales:0,tacos:0,cvr:0,ctr:0,adcvr:0});let vals={sales:toNum(val(row,'sales')),units:toNum(val(row,'units')),profit:toNum(val(row,'profit')),spend:toNum(val(row,'spend')),sessions:toNum(val(row,'sessions')),impr:toNum(val(row,'impr')),clicks:toNum(val(row,'clicks')),orders:toNum(val(row,'orders')),adSales:toNum(val(row,'adSales')),tacos:toNum(val(row,'tacos'))/100,cvr:toNum(val(row,'cvr'))/100,ctr:toNum(val(row,'ctr'))/100,adcvr:toNum(val(row,'adcvr'))/100};Object.keys(vals).forEach(k=>{total[k]+=vals[k];it[k]+=vals[k]})}calc(total);Object.values(prod).forEach(calc);metricsTotal=total;$('status').innerHTML='<span class="ok">读取成功：</span>'+esc(sn)+'，共 '+rows.length+' 行';$('summary').innerHTML=[['销售额',money(total.sales)],['销量',Math.round(total.units)],['二级毛利率',pct(total.pm)],['TACOS',pct(total.tacos)],['访客',Math.round(total.sessions)],['总转化率',pct(total.cvr)],['广告CTR',pct(total.ctr)],['广告转化率',pct(total.adcvr)]].map(x=>`<div class="kpi"><span class="small">${x[0]}</span><b>${x[1]}</b></div>`).join('');productIssues=Object.entries(prod).sort((a,b)=>b[1].sales-a[1].sales).slice(0,15).map(([p,m])=>{let arr=[];if(total.cvr&&m.cvr<total.cvr*.75)arr.push('综合转化率下降');if(total.ctr&&m.ctr<total.ctr*.75)arr.push('广告点击率下降');if(total.adcvr&&m.adcvr<total.adcvr*.75)arr.push('广告转化率下降');if(m.tacos>Math.max(total.tacos*1.35,.10)||m.pm<0)arr.push('广告TACOS占比高/利润异常');return{p,m,arr}}).filter(x=>x.arr.length);$('metrics').className='';$('metrics').innerHTML=productIssues.length?productIssues.map((x,i)=>`<div class="option"><label><input type="checkbox" class="metric" checked data-i="${i}">${esc(x.p)}：${esc(x.arr.join('、'))}</label><div class="small">销售额 ${money(x.m.sales)}｜销量 ${Math.round(x.m.units)}｜毛利率 ${pct(x.m.pm)}｜TACOS ${pct(x.m.tacos)}｜CVR ${pct(x.m.cvr)}｜CTR ${pct(x.m.ctr)}</div></div>`).join(''):'<div class="hint small">暂无明显异常，可手动新增指标波动。</div>'}catch(err){$('status').innerHTML='<span class="err">读取失败：'+esc(err.message)+'</span>';console.error(err)}});function addManualMetric(){let box=$('metrics');if(box.textContent.includes('上传绩效表后'))box.innerHTML='';box.className='';box.insertAdjacentHTML('beforeend',`<div class="option manual"><label>指标类型</label><select class="mname"><option>访客下降</option><option>综合转化率下降</option><option>广告点击率下降</option><option>广告转化率下降</option><option>广告TACOS占比高</option><option>库存断货/冗余</option><option>利润率下降</option></select><label>涉及产品/说明</label><textarea class="mnote" rows="2"></textarea></div>`)}function selected(){let map=new Map();document.querySelectorAll('.reason:checked,.action:checked').forEach(cb=>{let i=+cb.dataset.i,o=OPTION_BANK[i];if(!map.has(i))map.set(i,{o,actions:[],note:''});if(cb.classList.contains('action'))map.get(i).actions.push({cat:cb.dataset.cat,text:cb.dataset.text});let n=document.querySelector(`.note[data-i="${i}"]`);if(n)map.get(i).note=n.value.trim()});return[...map.values()]}function generateReport(){let lines=['运营项目周报','','一、本月目标',$('target').value.trim()||'（请填写本月目标）','','二、本周完成进度',$('progress').value.trim()||'（请填写本周完成进度）',''];if(metricsTotal.sales)lines.push(`自动指标摘要：销售额 ${money(metricsTotal.sales)}，销量 ${Math.round(metricsTotal.units)}，二级毛利率 ${pct(metricsTotal.pm)}，TACOS ${pct(metricsTotal.tacos)}，访客 ${Math.round(metricsTotal.sessions)}，总转化率 ${pct(metricsTotal.cvr)}，广告CTR ${pct(metricsTotal.ctr)}，广告转化率 ${pct(metricsTotal.adcvr)}。`);lines.push('','三、主要指标波动');let has=false;document.querySelectorAll('.metric:checked').forEach(cb=>{let x=productIssues[+cb.dataset.i];if(x){has=true;lines.push(`- ${x.p}：${x.arr.join('、')}。销售额 ${money(x.m.sales)}，毛利率 ${pct(x.m.pm)}，TACOS ${pct(x.m.tacos)}。`)}});document.querySelectorAll('.manual').forEach(el=>{let n=el.querySelector('.mname').value,note=el.querySelector('.mnote').value.trim();if(note){has=true;lines.push(`- ${n}：${note}`)}});if(!has)lines.push('- （请选择或手动新增指标波动）');let sel=selected();lines.push('','四、差距分析（原因来自运营项目周报）');if(!sel.length)lines.push('- （请选择原因维度/关键动作）');sel.forEach(s=>{lines.push(`- 【${s.o.dimension}/${s.o.issue}】${s.o.thinking||''}${s.note?'；补充：'+s.note:''}`);if(s.o.check_methods)lines.push('  检查方向：'+String(s.o.check_methods).split('\n').filter(Boolean).slice(0,4).join('；'))});lines.push('','五、关键动作 / 下周计划');let acts=[];sel.forEach(s=>s.actions.forEach(a=>acts.push(a)));if(!acts.length)lines.push('- （请勾选关键动作）');['市场','竞品','产品','广告','售后','其他'].forEach(c=>{let arr=acts.filter(a=>a.cat===c);if(arr.length){lines.push(c+'：');arr.forEach(a=>lines.push('- '+a.text))}});lines.push('','六、需要协同/备注','（补充产品、采购、物流、售后、设计、广告等协同事项）');$('output').textContent=lines.join('\n')}function downloadTxt(){if(!$('output').textContent.trim())generateReport();let blob=new Blob([$('output').textContent],{type:'text/plain;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='运营项目周报草稿.txt';a.click();URL.revokeObjectURL(a.href)}async function copyReport(){if(!$('output').textContent.trim())generateReport();await navigator.clipboard.writeText($('output').textContent);alert('已复制')}</script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运营项目周报生成工具</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="xlsx.full.min.js"></script>
+  <script src="reason_bank.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">WEEKLY OPERATIONS REVIEW</p>
+        <h1>运营项目周报生成工具</h1>
+        <p>只上传《绩效复盘表格优化-白板6.15》同结构文件，自动分析最新月份和最新周。原因、关键动作与下周计划均从《运营项目周报》选项库中选择。</p>
+      </div>
+      <div class="hero-badge">
+        <strong>单文件上传</strong>
+        <span>下拉选择原因，可补充说明</span>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="section-title">
+        <div>
+          <span class="step">1</span>
+          <h2>上传绩效复盘表</h2>
+        </div>
+        <button id="loadSample" class="button ghost" type="button">查看示例状态</button>
+      </div>
+      <label class="upload" for="file">
+        <input type="file" id="file" accept=".xlsx,.xls">
+        <span class="upload-icon">XLSX</span>
+        <span>
+          <strong>点击选择绩效复盘表</strong>
+          <small>优先读取“每日数据”，按最新日期自动确定月份和周次</small>
+        </span>
+      </label>
+      <div id="status" class="status muted">尚未上传文件</div>
+      <div id="periodInfo" class="period-info hidden"></div>
+      <div id="summary" class="kpi-grid"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <div>
+          <span class="step">2</span>
+          <h2>填写两项人工内容</h2>
+        </div>
+        <span class="section-note">其他部分由数据和选项库生成</span>
+      </div>
+      <div class="two-columns">
+        <div>
+          <label for="target">本月目标</label>
+          <textarea id="target" rows="7" placeholder="例如：本月GMV目标、销量目标、利润率目标、重点产品目标……"></textarea>
+        </div>
+        <div>
+          <label for="progress">本周完成进度</label>
+          <textarea id="progress" rows="7" placeholder="可手动填写本周完成事项；上传后也会自动生成数据摘要。"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <div>
+          <span class="step">3</span>
+          <h2>确认主要指标波动</h2>
+        </div>
+        <button id="addMetric" class="button ghost" type="button">新增自定义指标</button>
+      </div>
+      <p class="help">总量指标在周长度不同时按日均环比，比例指标直接环比。勾选后写入报告，可在每项后补充业务说明。</p>
+      <div id="metrics" class="empty">上传文件后自动生成指标波动。</div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <div>
+          <span class="step">4</span>
+          <h2>选择原因、关键动作和下周计划</h2>
+        </div>
+        <button id="addAnalysis" class="button primary" type="button">新增分析项</button>
+      </div>
+      <div class="logic-note">
+        原因维度只取自《运营项目周报》：访客、综合转化率、广告点击率、广告转化率、广告TACOS、库存管控。
+      </div>
+      <div id="analysisList" class="analysis-list">
+        <div class="empty">上传文件后会根据波动自动推荐分析项，也可以手动新增。</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <div>
+          <span class="step">5</span>
+          <h2>生成周报</h2>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button id="generate" class="button primary" type="button">生成周报</button>
+        <button id="downloadDoc" class="button dark" type="button">下载 Word</button>
+        <button id="downloadTxt" class="button ghost" type="button">下载 TXT</button>
+        <button id="copy" class="button ghost" type="button">复制文本</button>
+        <button id="print" class="button ghost" type="button">打印 / PDF</button>
+      </div>
+      <article id="report" class="report">
+        <div class="empty">完成前四步后生成报告。</div>
+      </article>
+    </section>
+
+    <footer>
+      <span>数据仅在当前浏览器中处理，不会上传到服务器。</span>
+      <span>原因选项来源：《运营项目周报.xlsx》</span>
+    </footer>
+  </main>
+</body>
+</html>
